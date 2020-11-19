@@ -20,15 +20,16 @@ import torch.utils.data as data
 import torchvision.transforms as transforms
 import torchvision.datasets as datasets
 
-from src.utils import (
-    bool_flag,
-    initialize_exp,
-    restart_from_checkpoint,
-    fix_random_seeds,
-    AverageMeter,
-    init_distributed_mode,
-    accuracy,
-)
+from src.utils import *
+# (
+#     bool_flag,
+#     initialize_exp,
+#     restart_from_checkpoint,
+#     fix_random_seeds,
+#     AverageMeter,
+#     init_distributed_mode,
+#     accuracy,
+# )
 import src.resnet50 as resnet_models
 
 logger = getLogger()
@@ -92,34 +93,38 @@ parser.add_argument("--local_rank", default=0, type=int,
 def main():
     global args, best_acc
     args = parser.parse_args()
-    init_distributed_mode(args)
+    # init_distributed_mode(args)
     fix_random_seeds(args.seed)
     logger, training_stats = initialize_exp(
         args, "epoch", "loss", "prec1", "prec5", "loss_val", "prec1_val", "prec5_val"
     )
 
+    os.environ["CUDA_VISIBLE_DEVICES"] = str('0')
+
     # build data
-    train_dataset = datasets.ImageFolder(os.path.join(args.data_path, "train"))
-    val_dataset = datasets.ImageFolder(os.path.join(args.data_path, "val"))
+    # train_dataset = datasets.ImageFolder(os.path.join(args.data_path, "train"))
+    # val_dataset = datasets.ImageFolder(os.path.join(args.data_path, "val"))
+    train_dataset = datasets.CIFAR10(args.data_path, train=True)
+    val_dataset = datasets.CIFAR10(args.data_path, train=False)
     tr_normalize = transforms.Normalize(
         mean=[0.485, 0.456, 0.406], std=[0.228, 0.224, 0.225]
     )
     train_dataset.transform = transforms.Compose([
-        transforms.RandomResizedCrop(224),
+        transforms.RandomResizedCrop(32),
         transforms.RandomHorizontalFlip(),
         transforms.ToTensor(),
         tr_normalize,
     ])
     val_dataset.transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224),
+        transforms.Resize(32),
+        transforms.CenterCrop(32),
         transforms.ToTensor(),
         tr_normalize,
     ])
-    sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    # sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        sampler=sampler,
+        # sampler=sampler,
         batch_size=args.batch_size,
         num_workers=args.workers,
         pin_memory=True,
@@ -137,21 +142,21 @@ def main():
     linear_classifier = RegLog(1000, args.arch, args.global_pooling, args.use_bn)
 
     # convert batch norm layers (if any)
-    linear_classifier = nn.SyncBatchNorm.convert_sync_batchnorm(linear_classifier)
+    # linear_classifier = nn.SyncBatchNorm.convert_sync_batchnorm(linear_classifier)
 
     # model to gpu
     model = model.cuda()
     linear_classifier = linear_classifier.cuda()
-    linear_classifier = nn.parallel.DistributedDataParallel(
-        linear_classifier,
-        device_ids=[args.gpu_to_work_on],
-        find_unused_parameters=True,
-    )
+    # linear_classifier = nn.parallel.DistributedDataParallel(
+    #     linear_classifier,
+    #     device_ids=[args.gpu_to_work_on],
+    #     find_unused_parameters=True,
+    # )
     model.eval()
 
     # load weights
     if os.path.isfile(args.pretrained):
-        state_dict = torch.load(args.pretrained, map_location="cuda:" + str(args.gpu_to_work_on))
+        state_dict = torch.load(args.pretrained, map_location="cuda:0")
         if "state_dict" in state_dict:
             state_dict = state_dict["state_dict"]
         # remove prefixe "module."
@@ -205,7 +210,7 @@ def main():
         logger.info("============ Starting epoch %i ... ============" % epoch)
 
         # set samplers
-        train_loader.sampler.set_epoch(epoch)
+        # train_loader.sampler.set_epoch(epoch)
 
         scores = train(model, linear_classifier, optimizer, train_loader, epoch)
         scores_val = validate_network(val_loader, model, linear_classifier)

@@ -21,14 +21,7 @@ import torch.optim
 import apex
 from apex.parallel.LARC import LARC
 
-from src.utils import (
-    bool_flag,
-    initialize_exp,
-    restart_from_checkpoint,
-    fix_random_seeds,
-    AverageMeter,
-    init_distributed_mode,
-)
+from src.utils import *
 from src.multicropdataset import MultiCropDataset
 import src.resnet50 as resnet_models
 
@@ -120,9 +113,11 @@ parser.add_argument("--seed", type=int, default=31, help="seed")
 def main():
     global args
     args = parser.parse_args()
-    init_distributed_mode(args)
+    # init_distributed_mode(args)
     fix_random_seeds(args.seed)
     logger, training_stats = initialize_exp(args, "epoch", "loss")
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = str('0')
 
     # build data
     train_dataset = MultiCropDataset(
@@ -132,10 +127,10 @@ def main():
         args.min_scale_crops,
         args.max_scale_crops,
     )
-    sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
+    # sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
     train_loader = torch.utils.data.DataLoader(
         train_dataset,
-        sampler=sampler,
+        # sampler=sampler,
         batch_size=args.batch_size,
         num_workers=args.workers,
         pin_memory=True,
@@ -150,14 +145,15 @@ def main():
         output_dim=args.feat_dim,
         nmb_prototypes=args.nmb_prototypes,
     )
+
     # synchronize batch norm layers
-    if args.sync_bn == "pytorch":
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-    elif args.sync_bn == "apex":
-        process_group = None
-        if args.world_size // 8 > 0:
-            process_group = apex.parallel.create_syncbn_process_group(args.world_size // 8)
-        model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
+    # if args.sync_bn == "pytorch":
+    #     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    # elif args.sync_bn == "apex":
+    #     process_group = None
+    #     if args.world_size // 8 > 0:
+    #         process_group = apex.parallel.create_syncbn_process_group(args.world_size // 8)
+    #     model = apex.parallel.convert_syncbn_model(model, process_group=process_group)
     # copy model to GPU
     model = model.cuda()
     if args.rank == 0:
@@ -185,11 +181,11 @@ def main():
         logger.info("Initializing mixed precision done.")
 
     # wrap model
-    model = nn.parallel.DistributedDataParallel(
-        model,
-        device_ids=[args.gpu_to_work_on],
-        find_unused_parameters=True,
-    )
+    # model = nn.parallel.DistributedDataParallel(
+    #     model,
+    #     device_ids=[args.gpu_to_work_on],
+    #     find_unused_parameters=True,
+    # )
 
     # optionally resume from a checkpoint
     to_restore = {"epoch": 0}
@@ -218,7 +214,7 @@ def main():
         logger.info("============ Starting epoch %i ... ============" % epoch)
 
         # set sampler
-        train_loader.sampler.set_epoch(epoch)
+        # train_loader.sampler.set_epoch(epoch)
 
         # optionally starts a queue
         if args.queue_length > 0 and epoch >= args.epoch_queue_starts and queue is None:
@@ -275,9 +271,9 @@ def train(train_loader, model, optimizer, epoch, lr_schedule, queue):
 
         # normalize the prototypes
         with torch.no_grad():
-            w = model.module.prototypes.weight.data.clone()
+            w = model.prototypes.weight.data.clone()
             w = nn.functional.normalize(w, dim=1, p=2)
-            model.module.prototypes.weight.copy_(w)
+            model.prototypes.weight.copy_(w)
 
         # ============ multi-res forward passes ... ============
         embedding, output = model(inputs)
@@ -296,7 +292,7 @@ def train(train_loader, model, optimizer, epoch, lr_schedule, queue):
                         use_the_queue = True
                         out = torch.cat((torch.mm(
                             queue[i],
-                            model.module.prototypes.weight.t()
+                            model.prototypes.weight.t()
                         ), out))
                     # fill the queue
                     queue[i, bs:] = queue[i, :-bs].clone()
@@ -352,7 +348,7 @@ def train(train_loader, model, optimizer, epoch, lr_schedule, queue):
 def distributed_sinkhorn(Q, nmb_iters):
     with torch.no_grad():
         sum_Q = torch.sum(Q)
-        dist.all_reduce(sum_Q)
+        # dist.all_reduce(sum_Q)
         Q /= sum_Q
 
         u = torch.zeros(Q.shape[0]).cuda(non_blocking=True)
@@ -360,14 +356,14 @@ def distributed_sinkhorn(Q, nmb_iters):
         c = torch.ones(Q.shape[1]).cuda(non_blocking=True) / (args.world_size * Q.shape[1])
 
         curr_sum = torch.sum(Q, dim=1)
-        dist.all_reduce(curr_sum)
+        # dist.all_reduce(curr_sum)
 
         for it in range(nmb_iters):
             u = curr_sum
             Q *= (r / u).unsqueeze(1)
             Q *= (c / torch.sum(Q, dim=0)).unsqueeze(0)
             curr_sum = torch.sum(Q, dim=1)
-            dist.all_reduce(curr_sum)
+            # dist.all_reduce(curr_sum)
         return (Q / torch.sum(Q, dim=0, keepdim=True)).t().float()
 
 

@@ -13,10 +13,11 @@ import numpy as np
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 
+from PIL import Image
 logger = getLogger()
 
 
-class MultiCropDataset(datasets.ImageFolder):
+class MultiCropDataset(datasets.CIFAR10):
     def __init__(
         self,
         data_path,
@@ -42,7 +43,7 @@ class MultiCropDataset(datasets.ImageFolder):
         for i in range(len(size_crops)):
             randomresizedcrop = transforms.RandomResizedCrop(
                 size_crops[i],
-                scale=(min_scale_crops[i], max_scale_crops[i]),
+            #     scale=(min_scale_crops[i], max_scale_crops[i]),
             )
             trans.extend([transforms.Compose([
                 randomresizedcrop,
@@ -54,8 +55,8 @@ class MultiCropDataset(datasets.ImageFolder):
         self.trans = trans
 
     def __getitem__(self, index):
-        path, _ = self.samples[index]
-        image = self.loader(path)
+        img = self.data[index]
+        image = Image.fromarray(img)
         multi_crops = list(map(lambda trans: trans(image), self.trans))
         if self.return_index:
             return index, multi_crops
