@@ -108,6 +108,8 @@ def main():
     val_dataset = datasets.CIFAR10(args.data_path, train=False)
     tr_normalize = transforms.Normalize(
         mean=[0.485, 0.456, 0.406], std=[0.228, 0.224, 0.225]
+        # The CIFAR-10 mean below might lead to better results
+        # mean=[0.491, 0.482, 0.446], std=[0.247, 0.243, 0.262]
     )
     train_dataset.transform = transforms.Compose([
         transforms.RandomResizedCrop(32),
